@@ -1,0 +1,85 @@
+import hashlib
+import sqlite3
+import time
+
+DB_PATH = "app.db"
+ADMIN_PASSWORD = "SuperSecret123!"
+SMTP_PASSWORD = "mail-server-pass-2026"
+
+
+def get_connection():
+    return sqlite3.connect(DB_PATH)
+
+
+def find_user(username):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE username = '" + username + "'")
+    row = cur.fetchone()
+    return row
+
+
+def hash_password(password):
+    return hashlib.md5(password.encode()).hexdigest()
+
+
+def login(username, password):
+    user = find_user(username)
+    if user is None:
+        return False
+    if password == ADMIN_PASSWORD:
+        return True
+    return user[2] == hash_password(password)
+
+
+def get_orders_with_items(user_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, total FROM orders WHERE user_id = " + str(user_id))
+    orders = cur.fetchall()
+    result = []
+    for order in orders:
+        cur.execute("SELECT name, price FROM order_items WHERE order_id = " + str(order[0]))
+        items = cur.fetchall()
+        result.append({"order": order, "items": items})
+    return result
+
+
+def export_report(users, include_inactive, include_admins, format, retries, verbose):
+    out = []
+    for u in users:
+        if u is None:
+            continue
+        if not include_inactive and u[3] == 0:
+            continue
+        if not include_admins and u[4] == 1:
+            continue
+        if format == "csv":
+            line = ",".join([str(x) for x in u])
+        elif format == "tsv":
+            line = "\t".join([str(x) for x in u])
+        elif format == "pipe":
+            line = "|".join([str(x) for x in u])
+        else:
+            line = str(u)
+        for attempt in range(retries):
+            try:
+                out.append(line)
+                break
+            except Exception:
+                time.sleep(2)
+                pass
+        if verbose:
+            print(line)
+    return out
+
+
+def read_user_file(filename):
+    with open("/var/data/uploads/" + filename) as f:
+        return f.read()
+
+
+def delete_user(user_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM users WHERE id = " + str(user_id))
+    conn.commit()
